@@ -15,6 +15,10 @@ hyperopt==0.2.5
 python==3.7.4
 
 ### Instructions to run the experiment
+Amazon and Yelpchi are download from https://github.com/YingtongDou/CARE-GNN/tree/master/data or dgl.data.FraudDataset.
+Put them in /data directory 
+
+
 **Step 1.** Run the search process, given different random seeds.
 (The Cora dataset is used as an example)
 ```
