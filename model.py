@@ -39,14 +39,7 @@ class NaOp(nn.Module):
       return self.act(self._op(x, edge_index)+self.op_linear(x))
     else:
       return self.act(self._op(x, edge_index))
-# class NaMLPOp(nn.Module):
-#     def __init__(self, primitive, in_dim, out_dim, act):
-#         super(NaMLPOp, self).__init__()
-#         self._op = NA_MLP_OPS[primitive](in_dim, out_dim)
-#         self.act = act_map(act)
-# 
-#     def forward(self, x, edge_index):
-#         return self.act(self._op(x, edge_index))
+
 
 class ScOp(nn.Module):
     def __init__(self, primitive):
@@ -63,7 +56,7 @@ class LaOp(nn.Module):
         self.act = act_map(act)
 
     def forward(self, x):
-        return self.act(self._op(x))
+        return self._op(x)
 
 class NetworkGNN(nn.Module):
     '''
@@ -94,7 +87,7 @@ class NetworkGNN(nn.Module):
         #skip op
         if self.args.fix_last:
             if self.num_layers > 1:
-                self.sc_layers = nn.ModuleList([ScOp(ops[i+num_layers*3]) for i in range(num_layers - 1)])
+                self.sc_layers = nn.ModuleList([ScOp(ops[i+num_layers*3]) for i in range(num_layers-1)])
             else:
                 self.sc_layers = nn.ModuleList([ScOp(ops[num_layers*3])])
         else:
@@ -112,28 +105,17 @@ class NetworkGNN(nn.Module):
                 self.lns.append(LayerNorm(hidden_size, affine=True))
 
         #layer aggregator op
-        self.layer6 = LaOp(ops[-1], hidden_size, 'linear', num_layers)
-
-        # self.classifier = nn.Linear(hidden_size, out_dim)
+        self.layer6 = LaOp(ops[-1], hidden_size, 'linear', num_layers+1)
         self.classifier = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, out_dim))
-        #self._initialize_alphas()
-
-    def new(self):
-        model_new = Network(self._C, self._num_classes, self._layers, self._criterion).cuda()
-        for x, y in zip(model_new.arch_parameters(), self.arch_parameters()):
-            x.data.copy_(y.data)
-        return model_new
 
     def forward(self, data,edge_index):
         x, edge_index = data.x, edge_index
-
-        #generate weights by softmax
         x = self.lin1(x)
         x = F.dropout(x, p=self.in_dropout, training=self.training)
-        js = []
+        js=[torch.relu(x)]
         for i in range(self.num_layers):
             x0 = self.gnn_layers[i*3](x, edge_index[0].cuda())
             x1 = self.gnn_layers[i*3+1](x, edge_index[1].cuda())
@@ -142,8 +124,6 @@ class NetworkGNN(nn.Module):
             x = self.lin2(x)
             x=torch.relu(x)
             if self.args.with_layernorm:
-                # layer_norm = nn.LayerNorm(normalized_shape=x.size(), elementwise_affine=False)
-                # x = layer_norm(x)
                 x = self.lns[i](x)
             x = F.dropout(x, p=self.in_dropout, training=self.training)
             if i == self.num_layers - 1 and self.args.fix_last:
@@ -152,54 +132,11 @@ class NetworkGNN(nn.Module):
                 js.append(self.sc_layers[i](x))
         x5 = self.layer6(js)
         x5 = F.dropout(x5, p=self.out_dropout, training=self.training)
-        x5 = torch.relu(x5)
         logits = self.classifier(x5)
-        return logits
+        return logits,x5
 
     def _loss(self, logits, target):
         return self._criterion(logits, target)
 
-    def _initialize_alphas(self):
-        num_na_ops = len(NA_PRIMITIVES)
-        num_sc_ops = len(SC_PRIMITIVES)
-        num_la_ops = len(LA_PRIMITIVES)
-
-        #self.alphas_normal = Variable(1e-3*torch.randn(k, num_ops).cuda(), requires_grad=True)
-        self.na_alphas = Variable(1e-3*torch.randn(self.num_layers, 3,num_na_ops).cuda(), requires_grad=True)
-        if self.num_layers > 1:
-            self.sc_alphas = Variable(1e-3*torch.randn(self.num_layers - 1, num_sc_ops).cuda(), requires_grad=True)
-        else:
-            self.sc_alphas = Variable(1e-3*torch.randn(1, num_sc_ops).cuda(), requires_grad=True)
-        self.la_alphas = Variable(1e-3*torch.randn(1, num_la_ops).cuda(), requires_grad=True)
-        self._arch_parameters = [
-            self.na_alphas,
-            self.sc_alphas,
-            self.la_alphas,
-            ]
-
-    def arch_parameters(self):
-        return self._arch_parameters
-
-    def genotype(self):
-
-        def _parse(na_weights, sc_weights, la_weights):
-            gene = []
-            na_indices = torch.argmax(na_weights, dim=-1)
-            for k in na_indices:
-                for s in k:
-                    gene.append(NA_PRIMITIVES[s])
-            #sc_indices = sc_weights.argmax(dim=-1)
-            sc_indices = torch.argmax(sc_weights, dim=-1)
-            for k in sc_indices:
-                gene.append(SC_PRIMITIVES[k])
-            #la_indices = la_weights.argmax(dim=-1)
-            la_indices = torch.argmax(la_weights, dim=-1)
-            for k in la_indices:
-                gene.append(LA_PRIMITIVES[k])
-            return '||'.join(gene)
-
-        gene = _parse(F.softmax(self.na_alphas, dim=-1).data.cpu(), F.softmax(self.sc_alphas, dim=-1).data.cpu(), F.softmax(self.la_alphas, dim=-1).data.cpu())
-
-        return gene
 
 

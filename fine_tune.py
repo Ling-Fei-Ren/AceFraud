@@ -6,26 +6,29 @@ import json
 import pickle
 import logging
 import numpy as np
-
+import random
+from sklearn import manifold
+import matplotlib.pyplot as plt
+from matplotlib import pyplot
 import hyperopt
 from hyperopt import fmin, tpe, hp, Trials, partial, STATUS_OK
 from logging_util import init_logger
 from train4tune import main
 
 sane_space ={'model': 'SANE',
-         'hidden_size': 64,
-         'learning_rate': 0.0022353347994672973,
-         'weight_decay': 1.5262562842068167e-05,
-         'optimizer': 'adam',
-         'in_dropout': 0.4,
-         'out_dropout': 0.2,
-         'activation': 'relu'
+         'hidden_size': hp.choice('hidden_size', [16, 32, 64, 128, 256]),
+         'learning_rate': hp.uniform("lr", -3, -1.5),
+         'weight_decay': hp.uniform("wr", -5, -3),
+         'optimizer': hp.choice('opt', ['adagrad', 'adam']),
+         'in_dropout': hp.choice('in_dropout', [0, 1, 2, 3, 4, 5, 6]),
+         'out_dropout': hp.choice('out_dropout', [0, 1, 2, 3, 4, 5, 6]),
+         'activation': hp.choice('act', ['relu', 'elu'])
          }
 
 def get_args():
     parser = argparse.ArgumentParser("sane")
     parser.add_argument('--gpu', type=int, default=0, help='gpu device id')
-    parser.add_argument('--data', type=str, default='../data', help='location of the data corpus')
+    parser.add_argument('--data', type=str, default='data', help='location of the data corpus')
     parser.add_argument('--arch_filename', type=str, default='', help='given the location of searched res')
     parser.add_argument('--arch', type=str, default='', help='given the specific of searched res')
     parser.add_argument('--num_layers', type=int, default=2, help='num of GNN layers in SANE')
@@ -38,17 +41,6 @@ def get_args():
     parser.add_argument('--epochs', type=int, default=400, help='epoch in train GNNs.')
     parser.add_argument('--cos_lr', action='store_true', default=False, help='using lr decay in training GNNs.')
     parser.add_argument('--fix_last', type=bool, default=True, help='fix last layer in design architectures.')
-    parser.add_argument('--model', type=str, default='SANE', help='gpu device id')
-    parser.add_argument('--hidden_size', type=int, default=64, help='gpu device id')
-    parser.add_argument('--learning_rate', type=int, default=0.0022353347994672973, help='gpu device id')
-    parser.add_argument('--weight_decay', type=int, default=1.5262562842068167e-05, help='gpu device id')
-    parser.add_argument('--optimizer', type=str, default='adam', help='gpu device id')
-    parser.add_argument('--in_dropout', type=int, default=0.4, help='gpu device id')
-    parser.add_argument('--out_dropout', type=int, default=0.2, help='gpu device id')
-    parser.add_argument('--activation', type=str, default='relu', help='gpu device id')
-    parser.add_argument('--seed', type=int, default=2, help='gpu device id')
-    parser.add_argument('--grad_clip', type=int, default=5, help='gpu device id')
-    parser.add_argument('--momentum', type=int, default=0.9, help='gpu device id')
 
     global args1
     args1 = parser.parse_args()
@@ -71,35 +63,18 @@ def generate_args(arg_map):
     args.in_dropout = args.in_dropout / 10.0
     args.out_dropout = args.out_dropout / 10.0
     args.save = '{}_{}'.format(args.data, datetime.strftime(datetime.now(), '%Y%m%d-%H%M%S'))
-    args1.save = '../logs/tune-{}'.format(args.save)
+    args1.save = 'logs/tune-{}'.format(args.save)
     args.seed = 2
     args.grad_clip = 5
     args.momentum = 0.9
     return args
-
-def generate_args_1():
-    args = ARGS()
-    args.learning_rate = 0.0022353347994672973
-    args.weight_decay = 1.5262562842068167e-05
-    args.in_dropout = 0.6
-    args.out_dropout = 0.5
-    args.save = '{}_{}'.format(args.data, datetime.strftime(datetime.now(), '%Y%m%d-%H%M%S'))
-    args1.save = '../logs/tune-{}'.format(args.save)
-    args.seed = 2
-    args.grad_clip = 5
-    args.momentum = 0.9
-    return args
-
 
 def objective(args):
     args = generate_args(args)
-    vali_auc, test_auc, args,test_f1,test_recall = main(args)
+    vali_auc, test_auc, args,test_f1,test_recall,embedding,y= main(args)
     return {
         'loss': -vali_auc,
         'test_auc': test_auc,
-        'test_f1': test_f1,
-        'test_recall': test_recall,
-
         'status': STATUS_OK,
         'eval_time': round(time.time(), 2),
         }
@@ -150,34 +125,45 @@ def run_fine_tune():
 
             start = time.time()
             trials = Trials()
+            #tune with validation acc, and report the test accuracy with the best validation acc
+            best = fmin(objective, sane_space, algo=partial(tpe.suggest, n_startup_jobs=int(args1.hyper_epoch/5)),
+                        max_evals=args1.hyper_epoch, trials=trials)
+
+            space = hyperopt.space_eval(sane_space, best)
+            print('best space is ', space)
+            res['best_space'] = space
+            args = generate_args(space)
+            print('best args from space is ', args.__dict__)
+            res['tuned_args'] = args.__dict__
+
             record_time_res = []
-            c_vali_auc, c_test_auc , c_test_f1, c_test_recall= 0, 0,0,0
+            c_vali_auc, c_test_auc = 0, 0
+            #report the test acc with the best vali acc
             for d in trials.results:
                 if -d['loss'] > c_vali_auc:
-                    c_vali_auc = -d['loss']
-                    c_test_auc = d['test_auc']
-                    c_test_f1=d['test_f1']
-                    c_test_recall=d['test_recall']
+                    c_vali_acc = -d['loss']
+                    c_test_acc = d['test_auc']
                     record_time_res.append('%s,%s,%s' % (d['eval_time'] - start, c_vali_auc, c_test_auc))
             res['test_auc'] = c_test_auc
-            res['test_f1'] = c_test_f1
-            res['test_recall'] = c_test_recall
             print('test_auc={}'.format(c_test_auc))
-            print('test_res=', res)
-
+            #print('test_res=', res)
+            max_auc=0
             test_aucs=[]
-            test_f1s=[]
-            test_recalls=[]
+            test_f1_1=[]
+            test_recall_1 = []
             for i in range(5):
-                vali_auc, t_auc, test_args, test_f1,test_recall= main(args1)
-                print('cal std: times:{}, valid_Auc:{}, test_auc:{}'.format(i,vali_auc,t_auc))
+                vali_auc, t_auc, test_args,test_f1,test_recall, embedding,y = main(args)
+                print('cal std: times:{}, valid_Acc:{}, test_acc:{}'.format(i,vali_auc,t_auc))
                 test_aucs.append(t_auc)
-                test_f1s.append(test_f1)
-                test_recalls.append(test_recall)
+                test_f1_1.append(test_f1)
+                test_recall_1.append(test_recall)
+                if t_auc > max_auc:
+                    max_auc = t_auc
+
             test_aucs = np.array(test_aucs)
-            test_f1s = np.array(test_f1s)
-            test_recalls = np.array(test_recalls)
-            print('test_aucs_5_times:{:.04f}+-{:.04f},test_f1s_5_times:{:.04f}+-{:.04f},test_recalls_5_times:{:.04f}+-{:.04f}'.format(np.mean(test_aucs), np.std(test_aucs),np.mean(test_f1s), np.std(test_f1s),np.mean(test_recalls), np.std(test_recalls)))
+            test_f1_1=np.array(test_f1_1)
+            test_recall_1=np.array(test_recall_1)
+            print('test_auc_5_times:{:.04f}+-{:.04f},test_f1_5_times:{:.04f}+-{:.04f},test_recall_5_times:{:.04f}+-{:.04f}'.format(np.mean(test_aucs), np.std(test_aucs),np.mean(test_f1_1), np.std(test_f1_1),np.mean(test_recall_1), np.std(test_recall_1)))
             test_res.append(res)
 
             test_res.append(res)

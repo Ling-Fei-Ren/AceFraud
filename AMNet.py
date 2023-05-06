@@ -35,6 +35,7 @@ class AMNet(nn.Module):
         self.attn.extend(list(self.W_f.parameters()))
         self.lin = list(self.linear_transform_in.parameters())
         self.reset_parameters()
+        self.t2=nn.Linear(hid_channels, hid_channels)
 
 
     def reset_parameters(self):
@@ -67,7 +68,7 @@ class AMNet(nn.Module):
         for i in range(1, self.filter_num):
             res += h_filters[:, i, :] * score[:, i]
 
-
+        res=self.t2(res)
         return res
 
 

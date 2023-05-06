@@ -105,8 +105,11 @@ class LaAggregator(nn.Module):
         self.lin = Linear(hidden_size, hidden_size)
 
   def forward(self, xs):
-    if self.mode in ['lstm', 'cat', 'max']:
+    if self.mode in ['lstm','max']:
       output = self.jump(xs)
+    elif self.mode == 'cat':
+      output = torch.cat([xs[0],xs[1],xs[2]],1)
+
     elif self.mode == 'sum':
       output = torch.stack(xs, dim=-1).sum(dim=-1)
     elif self.mode == 'mean':
@@ -118,34 +121,7 @@ class LaAggregator(nn.Module):
       output = torch.mul(input, weight).transpose(1, 2).sum(dim=-1)
 
     # return self.lin(F.relu(self.jump(xs)))
-    return self.lin(F.relu(output))
-
-
-class LationAggregator(nn.Module):
-
-  def __init__(self, mode, in_dim, out_dim):
-    super(LationAggregator, self).__init__()
-    self.mode = mode
-    if mode =='max':
-      self.jump = JumpingKnowledge(mode, channels=in_dim, num_layers=3)
-    elif mode == 'att':
-      self.att = Linear(in_dim, 1)
-
-    if mode == 'cat':
-        self.lin = Linear(in_dim * 3, out_dim)
-    else:
-        self.lin = Linear(in_dim, out_dim)
-
-  def forward(self, xs):
-    if self.mode in ['max']:
-      output = self.jump(xs)
-    elif self.mode == 'cat':
-      output = torch.cat([xs[0], xs[1], xs[2]], 1)
-    elif self.mode == 'sum':
-      output = torch.stack(xs, dim=-1).sum(dim=-1)
-    elif self.mode == 'mean':
-      output = torch.stack(xs, dim=-1).mean(dim=-1)
-    return self.lin(F.relu(output))
+    return F.relu(self.lin(output))
 
 
 class Identity(nn.Module):

@@ -95,11 +95,6 @@ def main(exp_args):
         with open('../data/small_Reddit/sampled_reddit.obj', 'rb') as f:
             data = pickle.load(f)
             raw_dir = '../data/small_Reddit/raw/'
-    # elif train_args.data == 'small_arxiv':
-    #     dataset = PygNodePropPredDataset(name='ogbn-arxiv')
-    #     with open('../data/small_arxiv/sampled_arxiv.obj', 'rb') as f:
-    #         data = pickle.load(f)
-    #         raw_dir = '../data/small_arxiv/raw/'
     genotype = train_args.arch
     hidden_size = train_args.hidden_size
 
@@ -129,12 +124,10 @@ def main(exp_args):
         edge_index = edge_index
         train_num_y_0 = data.y[data.train_mask].tolist().count(0)
         train_num_y_1 = data.y[data.train_mask].tolist().count(1)
-        # train_label_priors = compute_priors(train_num_y_0, train_num_y_1, device)
-        train_label_priors = torch.tensor([0,0]).to(device)
+        train_label_priors = compute_priors(train_num_y_0, train_num_y_1, device)
         valid_num_y_0 = data.y[data.val_mask].tolist().count(0)
         valid_num_y_1 = data.y[data.val_mask].tolist().count(1)
-        # valid_label_priors = compute_priors(valid_num_y_0, valid_num_y_1, device)
-        valid_label_priors = torch.tensor([0,0]).to(device)
+        valid_label_priors = compute_priors(valid_num_y_0, valid_num_y_1, device)
 
         num_features = data.x.shape[1]
         num_classes = int(max(labels))+1
@@ -156,7 +149,6 @@ def main(exp_args):
         optimizer = torch.optim.Adam(
             model.parameters(),
             train_args.learning_rate,
-            #momentum=args.momentum,
             weight_decay=train_args.weight_decay
             )
     elif train_args.optimizer == 'sgd':
@@ -182,8 +174,8 @@ def main(exp_args):
         if train_args.cos_lr:
             scheduler.step()
 
-        valid_auc, valid_obj,valid_f1,valid_recall = infer(train_args.data, data, edge_index,model, criterion)
-        test_auc, test_obj,test_f1,test_recall = infer(train_args.data, data, edge_index,model, criterion, test=True)
+        valid_auc, valid_obj,valid_f1,valid_recall,embedding = infer(train_args.data, data, edge_index,model, criterion)
+        test_auc, test_obj,test_f1,test_recall,embedding = infer(train_args.data, data, edge_index,model, criterion, test=True)
 
         if valid_auc > best_val_auc:
             best_val_auc = valid_auc
@@ -196,7 +188,10 @@ def main(exp_args):
 
         utils.save(model, os.path.join(train_args.save, 'weights.pt'))
 
-    return best_val_auc, best_test_auc, train_args,best_test_f1,best_test_recall
+    model.eval()
+    logits,embedding = model(data.to(device), edge_index)
+
+    return best_val_auc, best_test_auc, train_args,best_test_f1,best_test_recall,embedding[data.test_mask],data.y[data.test_mask]
 
 def train(dataset_name, data, edge_index,train_label_priors,valid_label_priors,model, criterion, optimizer):
     if dataset_name == 'PPI':
@@ -217,13 +212,13 @@ def train_trans(data, edge_index,train_label_priors,valid_label_priors,model, cr
     target = data.y[mask].to(device)
 
     optimizer.zero_grad()
-    logits = model(data.to(device),edge_index)
+    logits,embedding = model(data.to(device),edge_index)
 
     input = logits[mask].to(device)
 
     loss = criterion(input+train_label_priors, target)
     loss.backward()
-    nn.utils.clip_grad_norm_(model.parameters(), train_args.grad_clip)
+    # nn.utils.clip_grad_norm_(model.parameters(), train_args.grad_clip)
     optimizer.step()
 
     logits = torch.sigmoid(logits)
@@ -241,7 +236,7 @@ def infer_trans(data, edge_index,model, criterion, test=False):
     model.eval()
 
     with torch.no_grad():
-        logits = model(data.to(device),edge_index)
+        logits,embedding = model(data.to(device),edge_index)
     if test:
         mask = data.test_mask
     else:
@@ -255,7 +250,7 @@ def infer_trans(data, edge_index,model, criterion, test=False):
     f1 = f1_score(np.array(data.y[mask].data.cpu()), np.array(logits[mask].data.cpu().numpy().argmax(axis=1)),average="macro")
     recall = recall_score(np.array(data.y[mask].data.cpu()), np.array(logits[mask].data.cpu().numpy().argmax(axis=1)),average="macro")
     # acc = logits[mask].max(1)[1].eq(data.y[mask]).sum().item() / mask.sum().item()
-    return auc, loss/mask.sum().item(),f1,recall
+    return auc, loss/mask.sum().item(),f1,recall,embedding
 
 
 
@@ -297,7 +292,7 @@ def infer_ppi(data, edge_index,model, criterion, test=False):
     for val_data in infer_data:
         val_data = val_data.to(device)
         with torch.no_grad():
-            logits = model(val_data).to(device)
+            logits,embedding = model(val_data).to(device)
 
         loss = criterion(logits, val_data.y.to(device))
         total_loss += loss.item()
@@ -306,7 +301,7 @@ def infer_ppi(data, edge_index,model, criterion, test=False):
         ys.append(val_data.y.cpu())
     y, pred = torch.cat(ys, dim=0).numpy(), torch.cat(preds, dim=0).numpy()
     prec1 = f1_score(y, pred, average='micro')
-    return prec1, total_loss / len(infer_data.dataset)
+    return prec1, total_loss / len(infer_data.dataset),embedding
 
 if __name__ == '__main__':
   main()

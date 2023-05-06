@@ -61,6 +61,7 @@ class BernNet(torch.nn.Module):
 
         self.dprate = dprate
         self.dropout = dropout
+        self.lin2 = Linear(hid_channels, hid_channels)
 
     def reset_parameters(self):
         self.prop1.reset_parameters()
@@ -72,11 +73,11 @@ class BernNet(torch.nn.Module):
 
         if self.dprate == 0.0:
             x = self.prop1(x, edge_index)
-            return x
+            return self.lin2(x)
         else:
             x = F.dropout(x, p=self.dprate, training=self.training)
             x = self.prop1(x, edge_index)
-            return x
+            return self.lin2(x)
 
 
 

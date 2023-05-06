@@ -58,7 +58,7 @@ class NaMixedOp(nn.Module):
         op_linear_2 = torch.nn.Linear(in_dim, out_dim)
         self._ops_linear_2.append(op_linear_2)
 
-  def forward(self, x, weights, edge_index, ):
+  def forward(self, x, weights, edge_index ):
     mixed_res_0 = []
     mixed_res_1 = []
     mixed_res_2 = []
@@ -67,24 +67,25 @@ class NaMixedOp(nn.Module):
     if self.with_linear:
       p_sampled = random.choices([0, 1], weights=[1-self.k, self.k], k=weights[0].shape[0])
       for p,w, op, linear in zip(p_sampled,weights[0], self._ops_0, self._ops_linear_0):
-        mixed_res_0.append(p*w * F.elu(op(x, edge_index[0].cuda())+linear(x)))
+        mixed_res_0.append(p*w * F.relu(op(x, edge_index[0].cuda())+linear(x)))
 
       p_sampled = random.choices([0, 1], weights=[1-self.k, self.k], k=weights[1].shape[0])
       for p,w, op, linear in zip(p_sampled,weights[1], self._ops_1, self._ops_linear_1):
-        mixed_res_1.append(p*w * F.elu(op(x, edge_index[1].cuda())+linear(x)))
+        mixed_res_1.append(p*w * F.relu(op(x, edge_index[1].cuda())+linear(x)))
 
       p_sampled = random.choices([0, 1], weights=[1-self.k, self.k], k=weights[2].shape[0])
       for p, w, op, linear in zip(p_sampled,weights[2], self._ops_2, self._ops_linear_2):
-        mixed_res_2.append(p*w * F.elu(op(x, edge_index[2].cuda())+linear(x)))
+        mixed_res_2.append(p*w * F.relu(op(x, edge_index[2].cuda())+linear(x)))
     else:
-      for w, op in zip(weights[0], self._ops_0):
-        mixed_res_0.append(w * F.elu(op(x, edge_index[0].cuda())))
-
-      for w, op in zip(weights[1], self._ops_1):
-        mixed_res_1.append(w * F.elu(op(x, edge_index[1].cuda())))
-
-      for w, op in zip(weights[2], self._ops_2):
-        mixed_res_2.append(w * F.elu(op(x, edge_index[2].cuda())))
+      p_sampled = random.choices([0, 1], weights=[1 - self.k, self.k], k=weights[0].shape[0])
+      for p,w, op in zip(p_sampled,weights[0], self._ops_0):
+        mixed_res_0.append(p*w * F.relu(op(x, edge_index[0].cuda())))
+      p_sampled = random.choices([0, 1], weights=[1 - self.k, self.k], k=weights[0].shape[0])
+      for p,w, op in zip(p_sampled,weights[1], self._ops_1):
+        mixed_res_1.append(p*w * F.relu(op(x, edge_index[1].cuda())))
+      p_sampled = random.choices([0, 1], weights=[1 - self.k, self.k], k=weights[0].shape[0])
+      for p,w, op in zip(p_sampled,weights[2], self._ops_2):
+        mixed_res_2.append(p*w * F.relu(op(x, edge_index[2].cuda())))
 
     return sum(mixed_res_0),sum(mixed_res_1),sum(mixed_res_2)
 
@@ -119,25 +120,8 @@ class LaMixedOp(nn.Module):
     mixed_res = []
     p_sampled = random.choices([0, 1], weights=[1-self.k, self.k], k=weights.shape[0])
     for p,w, op in zip(p_sampled,weights, self._ops):
-      mixed_res.append(w * F.relu(op(x)))
+      mixed_res.append(p*w * op(x))
     return sum(mixed_res)
-
-class LationMixedOp(nn.Module):
-
-  def __init__(self, in_dim, out_dim):
-    super(LationMixedOp, self).__init__()
-    self._ops = nn.ModuleList()
-    for primitive in LATION_PRIMITIVES:
-      op = LATION_OPS[primitive](in_dim, out_dim)
-      self._ops.append(op)
-
-  def forward(self, x, weights):
-    mixed_res = []
-    for w, op in zip(weights, self._ops):
-      mixed_res.append(w * F.relu(op(x)))
-    return sum(mixed_res)
-
-
 
 class Network(nn.Module):
   '''
@@ -146,7 +130,7 @@ class Network(nn.Module):
       for sane, we dont need cell, since the DAG is the whole search space, and what we need to do is implement the DAG.
   '''
 
-  def __init__(self, criterion, in_dim, out_dim, hidden_size, k,num_layers=3, dropout=0.5, epsilon=0.0, with_conv_linear=False, args=None):
+  def __init__(self, criterion, in_dim, out_dim, hidden_size, k,num_layers=3, dropout=0.0, epsilon=0.0, with_conv_linear=False, args=None):
     super(Network, self).__init__()
     self.in_dim = in_dim
     self.out_dim = out_dim
@@ -159,27 +143,21 @@ class Network(nn.Module):
     self.with_linear = with_conv_linear
     self.args = args
     self.k=k
-
-    #node aggregator op
     self.lin1 = nn.Linear(in_dim, hidden_size)
     self.lin2 = nn.Linear(hidden_size * 3, hidden_size)
     self.layers = nn.ModuleList()
+
     for i in range(self.num_layers):
         self.layers.append(NaMixedOp(hidden_size, hidden_size,self.k,self.with_linear))
 
-    self.relations=nn.ModuleList()
-    for i in range(self.num_layers):
-        self.relations.append(LationMixedOp(hidden_size, hidden_size))
-    #skip op
+
     self.scops = nn.ModuleList()
-    for i in range(self.num_layers-1):
-        self.scops.append(ScMixedOp(self.k))
-    if not self.args.fix_last:
+    for i in range(self.num_layers):
         self.scops.append(ScMixedOp(self.k))
 
     self.laop = LaMixedOp(hidden_size,self.k, num_layers)
 
-    # self.classifier = nn.Linear(hidden_size, out_dim)
+
     self.classifier = nn.Sequential(
         nn.Linear(hidden_size, hidden_size),
         nn.ReLU(),
@@ -194,32 +172,22 @@ class Network(nn.Module):
 
   def forward(self, data,edge_index, discrete=False):
     x, edge_index = data.x, edge_index
-
-    
     self.na_weights = F.softmax(self.na_alphas, dim=-1)
     self.sc_weights = F.softmax(self.sc_alphas, dim=-1)
     self.la_weights = F.softmax(self.la_alphas, dim=-1)
-
-
-    #generate weights by softmax
-    x = self.lin1(x)
+    x = F.relu(self.lin1(x))
     jk = []
+    # jk += [self.scops[0](x, self.sc_weights[0])]
     for i in range(self.num_layers):
         x0, x1, x2 = self.layers[i](x, self.na_weights[i], edge_index)
-        x0 = F.dropout(x0, p=self.dropout, training=self.training)
-        x1 = F.dropout(x1, p=self.dropout, training=self.training)
-        x2 = F.dropout(x2, p=self.dropout, training=self.training)
         x = torch.cat([x0, x1, x2], 1)
         x=self.lin2(x)
         x=torch.relu(x)
         if self.args.fix_last and i == self.num_layers-1:
             jk += [x]
         else:
-            jk += [self.scops[i](x, self.sc_weights[i])]
-
+            jk += [self.scops[i+1](x, self.sc_weights[i])]
     merge_feature = self.laop(jk, self.la_weights[0])
-    merge_feature = F.dropout(merge_feature, p=self.dropout, training=self.training)
-    merge_feature=torch.relu(merge_feature)
     logits = self.classifier(merge_feature)
     return logits
 
@@ -249,7 +217,7 @@ class Network(nn.Module):
     if self.args.fix_last:
         self.sc_alphas = Variable(1e-3*torch.randn(self.num_layers-1, num_sc_ops), requires_grad=True)
     else:
-        self.sc_alphas = Variable(1e-3*torch.randn(self.num_layers, num_sc_ops), requires_grad=True)
+        self.sc_alphas = Variable(1e-3*torch.randn(self.num_layers+1, num_sc_ops), requires_grad=True)
 
     self.la_alphas = Variable(1e-3*torch.randn(1, num_la_ops), requires_grad=True)
     self._arch_parameters = [

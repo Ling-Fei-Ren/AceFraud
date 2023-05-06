@@ -41,6 +41,7 @@ class FAGCN(nn.Module):
             self.layers.append(FALayer(hidden_dim, dropout))
 
         self.t1 = nn.Linear(in_dim, hidden_dim)
+        self.t2 = nn.Linear(hidden_dim, hidden_dim)
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -61,6 +62,6 @@ class FAGCN(nn.Module):
         for i in range(self.layer_num):
             h = self.layers[i](h,g)
             h = self.eps * raw + h
-
+        h=self.t2(h)
         return h
 
