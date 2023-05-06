@@ -1,7 +1,8 @@
 
 
 ### Overview
-This is the code for our paper [AceFraud: Aggregation Architecture Searcher for Fraud Detection]
+This is the code for our paper [IGNAS: An Imbalanced Graph Neural Architecture Search
+Framework for Fraud Detection]
 It is a differentiable architecture search for fraud detection.
 
 ### Requirements：
