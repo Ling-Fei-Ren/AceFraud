@@ -1,4 +1,4 @@
-This is the code for our paper [IGNAS: An Imbalanced Graph Neural Architecture Search Framework for Fraud Detection] It is a differentiable architecture search for fraud detection.
+This is the code for our paper [IGNAS: An Imbalanced Multi-relational Graph Neural Architecture Search Framework for Fraud Detection] It is a differentiable architecture search for fraud detection.
 
 Requirements：
 torch-cluster==1.5.7
