@@ -1,4 +1,6 @@
-This is the code for our paper [IGNAS: An Imbalanced Multi-relational Graph Neural Architecture Search Framework for Fraud Detection] It is a differentiable architecture search for fraud detection.
+This is the code for our paper [IGNAS: An Imbalanced Multi-relational Graph Neural Architecture Search Framework for Fraud Detection] 
+It is without any information about author name and organizaion name.
+It is only used for Reproducibility checking.
 
 Requirements：
 torch-cluster==1.5.7
@@ -23,6 +25,3 @@ Step 2. Fine tune the searched architectures. You need specify the arch_filename
 python fine_tune.py --data yelp  --fix_last True   --hyper_epoch 50  --arch_filename exp_res/yelp.txt   
 Step 2 is a coarse-graind tuning process, and the results are saved in a picklefile in the directory tuned_res.
 
-Cite
-Acknowledgement
-The code is built on [SANE](Search to aggregate neighborhood for Graph Neural Networks), one of the most well-known differentiable architecture search methods.
