@@ -1,4 +1,4 @@
-This is the code for our paper [IGNAS: An Imbalanced Multi-relational Graph Neural Architecture Search Framework for Fraud Detection] 
+
 It is without any information about author name and organizaion name.
 It is only used for Reproducibility checking.
 
